@@ -46,16 +46,81 @@ const flame = (n, live) => {
     <path d="M12 22a3.4 3.4 0 0 0 3.4-3.4c0-1.8-1.4-2.9-3.4-5-2 2.1-3.4 3.2-3.4 5A3.4 3.4 0 0 0 12 22z" fill="#fff" opacity=".28"/></svg><b>${n}</b></div>`;
 };
 
-/* state */
-let tab = 'tasks', sel = today(), kind = 'out';
-const CATS = { out: ['Food', 'Transport', 'Bills', 'Shopping', 'Other'], in: ['Salary', 'Business', 'Gift', 'Other'] };
+/* money helpers */
+const mk = d => d.slice(0, 7);
+const mShift = (m, n) => { const [y, mo] = m.split('-').map(Number); const x = new Date(y, mo - 1 + n, 1); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0'); };
+const mName = m => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); };
+const mTot = (m, k) => S.spend.filter(x => x.k === k && x.d.startsWith(m)).reduce((a, x) => a + x.a, 0);
+function carry(m) {
+  if (!S.spend.length) return 0;
+  let cur = S.spend.reduce((a, x) => x.d < a ? x.d : a, '9999-99-99').slice(0, 7), c = 0;
+  while (cur < m) { c = Math.max(0, c + mTot(cur, 'in') - mTot(cur, 'out')); cur = mShift(cur, 1); }
+  return c;
+}
 const CC = { Food: '#f59e0b', Transport: '#3b82f6', Bills: '#a855f7', Shopping: '#ec4899', Other: '#8aa0b2' };
+const keyOf = x => x.c === 'Other' && x.n ? x.n.trim().toLowerCase().replace(/^./, c => c.toUpperCase()) : x.c;
+const colorOf = k => { if (CC[k]) return CC[k]; let h = 0; for (const ch of k) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 70% 58%)`; };
+const CATS = { out: ['Food', 'Transport', 'Bills', 'Shopping', 'Other'], in: ['Salary', 'Business', 'Gift', 'Other'] };
+const short = v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(Math.round(v));
+
+/* state */
+let tab = 'tasks', sel = today(), kind = 'out', vm = mk(today());
+
+/* reminders */
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  t.onclick = () => t.remove();
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 9000);
+}
+async function notify(t) {
+  toast('⏰ ' + t.tm + ' · ' + t.t);
+  try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      reg.showNotification('Task reminder', { body: t.t + ' · ' + t.tm, icon: 'icon.svg', tag: t.id });
+    } catch (e) { try { new Notification('Task reminder', { body: t.t }); } catch (_) {} }
+  }
+}
+function checkReminders() {
+  const n = new Date(), d = today(), hm = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+  let ch = false;
+  S.tasks.forEach(t => {
+    if (t.tm && !t.done && !t.fired && t.d <= d && (t.d < d || t.tm <= hm)) { t.fired = true; ch = true; notify(t); }
+  });
+  if (ch) { save(); if (tab === 'tasks' && document.activeElement.tagName !== 'INPUT') render(); }
+}
 
 const act = {
-  addTask() { const v = $('#nt').value.trim(); if (v) S.tasks.unshift({ id: uid(), t: v, done: false, d: sel }); },
+  addTask() {
+    const v = $('#nt').value.trim();
+    if (!v) return;
+    const tm = $('#nm').value;
+    S.tasks.unshift({ id: uid(), t: v, done: false, d: sel, tm: tm || '' });
+    if (tm && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  },
   togTask(id) { const t = S.tasks.find(x => x.id === id); t.done = !t.done; },
   delTask(id) { S.tasks = S.tasks.filter(x => x.id !== id); },
   clearDone() { S.tasks = S.tasks.filter(x => !(x.d === sel && x.done)); },
+  ics(id) {
+    const t = S.tasks.find(x => x.id === id);
+    if (!t || !t.tm) return;
+    const clean = t.t.replace(/[,;\n]/g, ' ');
+    const txt = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Daily//EN', 'BEGIN:VEVENT', 'UID:' + t.id + '@daily',
+      'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z',
+      'DTSTART:' + t.d.replace(/-/g, '') + 'T' + t.tm.replace(':', '') + '00', 'SUMMARY:' + clean,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + clean, 'TRIGGER:-PT0M', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], { type: 'text/calendar' }));
+    a.download = 'task.ics';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  },
+  perm() { if ('Notification' in window) Notification.requestPermission().then(() => render()); },
   prev() { sel = shift(sel, -1); },
   next() { sel = shift(sel, 1); },
   pick(id) { sel = id; },
@@ -67,10 +132,13 @@ const act = {
   },
   delHabit(id) { if (confirm('Delete this habit?')) S.habits = S.habits.filter(x => x.id !== id); },
   kind(id) { kind = id; },
+  mprev() { vm = mShift(vm, -1); },
+  mnext() { if (vm < mk(today())) vm = mShift(vm, 1); },
   addSpend() {
     const a = parseFloat($('#sa').value);
     if (!(a > 0)) return;
     S.spend.unshift({ id: uid(), a, k: kind, c: $('#sc').value, n: $('#sn').value.trim(), d: today() });
+    vm = mk(today());
   },
   delSpend(id) { S.spend = S.spend.filter(x => x.id !== id); },
   mode(id) { S.theme.mode = id; applyTheme(); },
@@ -85,25 +153,25 @@ const dayCls = d => {
   const n = t.filter(x => x.done).length;
   return n === t.length ? 'full' : n ? 'part' : 'zero';
 };
-const short = v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(Math.round(v));
 
-function donut(items, total) {
+function donut(items, total, left) {
   const C = 2 * Math.PI * 42;
   let off = 0;
-  const arcs = items.map(([c, v]) => {
+  const arcs = items.map(([, v, col]) => {
     const l = v / total * C;
-    const s = `<circle cx="60" cy="60" r="42" fill="none" stroke="${CC[c] || '#8aa0b2'}" stroke-width="16" stroke-dasharray="${l} ${C - l}" stroke-dashoffset="${-off}"/>`;
+    const s = `<circle cx="60" cy="60" r="42" fill="none" style="stroke:${col}" stroke-width="16" stroke-dasharray="${l} ${C - l}" stroke-dashoffset="${-off}"/>`;
     off += l;
     return s;
   }).join('');
-  return `<svg viewBox="0 0 120 120" width="140" height="140"><g transform="rotate(-90 60 60)"><circle cx="60" cy="60" r="42" fill="none" stroke="var(--field)" stroke-width="16"/>${arcs}</g>
-    <text x="60" y="56" text-anchor="middle" font-size="9" fill="var(--mut)">Spent</text>
-    <text x="60" y="72" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">${short(total)}</text></svg>`;
+  return `<svg viewBox="0 0 120 120" width="140" height="140"><g transform="rotate(-90 60 60)"><circle cx="60" cy="60" r="42" fill="none" style="stroke:var(--field)" stroke-width="16"/>${arcs}</g>
+    <text x="60" y="56" text-anchor="middle" font-size="9" style="fill:var(--mut)">${left >= 0 ? 'Left' : 'Over'}</text>
+    <text x="60" y="73" text-anchor="middle" font-size="15" font-weight="700" style="fill:${left >= 0 ? 'var(--up)' : 'var(--dn)'}">${short(Math.abs(left))}</text></svg>`;
 }
 
 const views = {
   tasks() {
-    const list = S.tasks.filter(t => t.d === sel), done = list.filter(t => t.done).length, tot = list.length;
+    const list = S.tasks.filter(t => t.d === sel).sort((a, b) => (a.tm || '99:99').localeCompare(b.tm || '99:99'));
+    const done = list.filter(t => t.done).length, tot = list.length;
     const chips = [-3, -2, -1, 0, 1, 2, 3].map(i => {
       const d = shift(sel, i), dt = new Date(d + 'T12:00:00');
       return `<button class="dc ${d === sel ? 'on' : ''}" data-a="pick" data-id="${d}"><small>${dt.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 3)}</small><b>${dt.getDate()}</b><i class="${dayCls(d)}"></i></button>`;
@@ -111,10 +179,11 @@ const views = {
     return `<div class="week"><button class="ar" data-a="prev">‹</button><div class="days">${chips}</div><button class="ar" data-a="next">›</button></div>
       <div class="dl"><b>${label(sel)}</b>${sel !== today() ? '<button class="ghost sm" data-a="goToday">Back to today</button>' : ''}</div>
       ${tot ? `<div class="mini"><small>${done} of ${tot} done</small><div class="bar"><i style="width:${done / tot * 100}%"></i></div></div>` : ''}
-      <div class="add"><input id="nt" placeholder="Add a task for ${label(sel).toLowerCase()}" maxlength="120"><button data-a="addTask">Add</button></div>
+      <div class="add"><input id="nt" placeholder="Add a task" maxlength="120"><input id="nm" type="time" aria-label="Reminder time"><button data-a="addTask">Add</button></div>
       ${tot ? list.map(t => `<div class="row ${t.done ? 'done' : ''}">
         <button class="chk" data-a="togTask" data-id="${t.id}">${t.done ? '✓' : ''}</button>
-        <span>${esc(t.t)}</span>
+        <span>${esc(t.t)}${t.tm ? `<small>⏰ ${t.tm}</small>` : ''}</span>
+        ${t.tm ? `<button class="x" data-a="ics" data-id="${t.id}" aria-label="Add to calendar">📅</button>` : ''}
         <button class="x" data-a="delTask" data-id="${t.id}">×</button></div>`).join('') : '<p class="empty">No tasks for this day.</p>'}
       ${done ? '<button class="ghost full" data-a="clearDone" style="margin-top:6px">Clear completed</button>' : ''}`;
   },
@@ -132,37 +201,48 @@ const views = {
       }).join('') : '<p class="empty">Start with one small habit. Streaks keep you honest.</p>');
   },
   spend() {
-    const t = today(), m = t.slice(0, 7);
-    const sum = f => S.spend.filter(f).reduce((a, x) => a + x.a, 0);
-    const inc = sum(x => x.k === 'in' && x.d.startsWith(m)), exp = sum(x => x.k === 'out' && x.d.startsWith(m)), bal = inc - exp;
+    const m = vm, cur = mk(today());
+    const car = carry(m), inc = mTot(m, 'in'), exp = mTot(m, 'out'), avail = car + inc, left = avail - exp;
     const by = {};
-    S.spend.filter(x => x.k === 'out' && x.d.startsWith(m)).forEach(x => by[x.c] = (by[x.c] || 0) + x.a);
-    const items = Object.entries(by).sort((a, b) => b[1] - a[1]);
-    return `<div class="tiles">
-      <div class="card"><small>Income, this month</small><div class="big up">+${birr(inc)}</div></div>
-      <div class="card"><small>Spent, this month</small><div class="big dn">-${birr(exp)}</div></div></div>
-      <div class="card"><small>Balance</small><div class="big ${bal >= 0 ? 'up' : 'dn'}">${bal >= 0 ? '+' : '-'}${birr(Math.abs(bal))}</div></div>
-      ${exp ? `<div class="card"><div class="dn-wrap">${donut(items, exp)}<div class="leg">${items.map(([c, v]) =>
-        `<div><i style="background:${CC[c] || '#8aa0b2'}"></i><span>${esc(c)}</span><em>${Math.round(v / exp * 100)}%</em></div>`).join('')}</div></div></div>` : ''}
-      <div class="card form">
+    S.spend.filter(x => x.k === 'out' && x.d.startsWith(m)).forEach(x => { const k = keyOf(x); by[k] = (by[k] || 0) + x.a; });
+    const items = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, v, colorOf(k)]);
+    if (left > 0) items.push(['Left', left, 'var(--up)']);
+    const total = Math.max(avail, exp);
+    const entries = S.spend.filter(x => x.d.startsWith(m));
+    return `<div class="week"><button class="ar" data-a="mprev">‹</button>
+      <div class="mt"><b>${mName(m)}</b><small>${m === cur ? 'This month' : 'Past month'}</small></div>
+      <button class="ar" data-a="mnext" ${m >= cur ? 'disabled' : ''}>›</button></div>
+      <div class="tiles">
+        <div class="card"><small>Carried over</small><div class="big">${birr(car)}</div></div>
+        <div class="card"><small>Income</small><div class="big up">+${birr(inc)}</div></div>
+        <div class="card"><small>Spent</small><div class="big dn">-${birr(exp)}</div></div>
+        <div class="card"><small>Balance</small><div class="big ${left >= 0 ? 'up' : 'dn'}">${left >= 0 ? '' : '-'}${birr(Math.abs(left))}</div></div></div>
+      ${total > 0 ? `<div class="card"><div class="dn-wrap">${donut(items, total, left)}<div class="leg">${items.map(([k, v, col]) =>
+        `<div><i style="background:${col}"></i><span>${esc(k)}</span><em>${Math.round(v / total * 100)}%</em></div>`).join('')}</div></div></div>` : ''}
+      ${m === cur ? `<div class="card form">
         <div class="seg"><button class="${kind === 'out' ? 'on' : ''}" data-a="kind" data-id="out">Expense</button><button class="${kind === 'in' ? 'on' : ''}" data-a="kind" data-id="in">Income</button></div>
         <input id="sa" type="number" inputmode="decimal" placeholder="Amount in Birr">
         <select id="sc">${CATS[kind].map(c => `<option>${c}</option>`).join('')}</select>
         <input id="sn" placeholder="Note (optional)" maxlength="40">
-        <button data-a="addSpend">Add ${kind === 'out' ? 'expense' : 'income'}</button></div>
-      ${S.spend.length ? S.spend.slice(0, 20).map(x => `<div class="row">
-        <span class="c" style="color:${x.k === 'in' ? 'var(--up)' : (CC[x.c] || 'var(--mut)')}">${esc(x.c)}</span>
+        <button data-a="addSpend">Add ${kind === 'out' ? 'expense' : 'income'}</button></div>` : ''}
+      ${entries.length ? entries.map(x => `<div class="row">
+        <span class="c" style="color:${x.k === 'in' ? 'var(--up)' : colorOf(keyOf(x))}">${esc(x.c)}</span>
         <span>${esc(x.n) || '&nbsp;'}<small>${x.d}</small></span>
         <b class="${x.k === 'in' ? 'up' : 'dn'}">${x.k === 'in' ? '+' : '-'}${birr(x.a)}</b>
-        <button class="x" data-a="delSpend" data-id="${x.id}">×</button></div>`).join('') : '<p class="empty">Log what comes in and what goes out.</p>'}`;
+        <button class="x" data-a="delSpend" data-id="${x.id}">×</button></div>`).join('') : '<p class="empty">Nothing logged for this month.</p>'}`;
   },
   style() {
-    const th = S.theme;
+    const th = S.theme, perm = 'Notification' in window ? Notification.permission : 'unsupported';
+    const msg = perm === 'granted' ? 'Notifications are on. Timed tasks alert you while the app is open or in the background.'
+      : perm === 'denied' ? 'Notifications are blocked. Allow them for this site in your browser settings.'
+      : perm === 'default' ? 'Turn on notifications to get an alert when a task time arrives.'
+      : 'This browser does not support notifications.';
     return `<div class="card"><b>Mode</b><div class="seg" style="margin-top:10px">${['dark', 'black', 'light'].map(m =>
       `<button class="${th.mode === m ? 'on' : ''}" data-a="mode" data-id="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div></div>
       <div class="card"><b>Accent color</b><div class="sws">${SW.map(c =>
         `<button class="sw ${th.ac.toLowerCase() === c ? 'on' : ''}" style="background:${c}" data-a="ac" data-id="${c}" aria-label="${c}"></button>`).join('')}</div>
-        <label class="pick"><small>Or pick any color you want</small><input id="cc" type="color" value="${th.ac}"></label></div>`;
+        <label class="pick"><small>Or pick any color you want</small><input id="cc" type="color" value="${th.ac}"></label></div>
+      <div class="card"><b>Reminders</b><p><small>${msg}</small></p>${perm === 'default' ? '<button class="full" data-a="perm">Enable notifications</button>' : ''}</div>`;
   }
 };
 
@@ -175,7 +255,7 @@ function render() {
 
 $('#app').onclick = e => {
   const b = e.target.closest('[data-a]');
-  if (!b) return;
+  if (!b || b.disabled) return;
   const fn = act[b.dataset.a];
   if (fn) { fn(b.dataset.id); save(); render(); }
 };
@@ -203,4 +283,7 @@ $('#date').textContent = now.toLocaleDateString('en-US', { weekday: 'long', mont
 
 applyTheme();
 render();
+checkReminders();
+setInterval(checkReminders, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkReminders(); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
