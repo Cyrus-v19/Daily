@@ -83,3 +83,9 @@ button:active{transform:scale(.97)}
 #tabs{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:6px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--nav);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line)}
 #tabs button{flex:1;max-width:130px;padding:12px 6px;background:transparent;color:var(--mut)}
 #tabs button.on{background:var(--card);color:var(--ac);border:1px solid var(--line)}
+.add input[type=time]{width:112px;flex:none;padding:13px 8px}
+.row span small{display:block;margin-top:2px}
+.toast{position:fixed;left:16px;right:16px;top:calc(12px + env(safe-area-inset-top));max-width:528px;margin:0 auto;z-index:20;background:var(--ac);color:var(--onac);padding:14px 16px;border-radius:14px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.mt{flex:1;text-align:center;line-height:1.3}
+.mt b{display:block;font:700 18px 'Space Grotesk',sans-serif}
+.ar:disabled{opacity:.3}
