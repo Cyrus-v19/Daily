@@ -154,18 +154,21 @@ const dayCls = d => {
   return n === t.length ? 'full' : n ? 'part' : 'zero';
 };
 
-function donut(items, total, left) {
-  const C = 2 * Math.PI * 42;
-  let off = 0;
-  const arcs = items.map(([, v, col]) => {
-    const l = v / total * C;
-    const s = `<circle cx="60" cy="60" r="42" fill="none" style="stroke:${col}" stroke-width="16" stroke-dasharray="${l} ${C - l}" stroke-dashoffset="${-off}"/>`;
-    off += l;
-    return s;
-  }).join('');
-  return `<svg viewBox="0 0 120 120" width="140" height="140"><g transform="rotate(-90 60 60)"><circle cx="60" cy="60" r="42" fill="none" style="stroke:var(--field)" stroke-width="16"/>${arcs}</g>
+function donut(inc, out, total, left) {
+  const ring = (items, r, w) => {
+    const C = 2 * Math.PI * r;
+    let off = 0;
+    return `<circle cx="60" cy="60" r="${r}" fill="none" style="stroke:var(--field)" stroke-width="${w}"/>`
+      + items.map(([, v, col]) => {
+        const l = v / total * C;
+        const s = `<circle cx="60" cy="60" r="${r}" fill="none" style="stroke:${col}" stroke-width="${w}" stroke-dasharray="${l} ${C - l}" stroke-dashoffset="${-off}"/>`;
+        off += l;
+        return s;
+      }).join('');
+  };
+  return `<svg viewBox="0 0 120 120" width="150" height="150"><g transform="rotate(-90 60 60)">${ring(inc, 52, 9)}${ring(out, 38, 9)}</g>
     <text x="60" y="56" text-anchor="middle" font-size="9" style="fill:var(--mut)">${left >= 0 ? 'Left' : 'Over'}</text>
-    <text x="60" y="73" text-anchor="middle" font-size="15" font-weight="700" style="fill:${left >= 0 ? 'var(--up)' : 'var(--dn)'}">${short(Math.abs(left))}</text></svg>`;
+    <text x="60" y="72" text-anchor="middle" font-size="14" font-weight="700" style="fill:${left >= 0 ? 'var(--up)' : 'var(--dn)'}">${short(Math.abs(left))}</text></svg>`;
 }
 
 const views = {
@@ -203,12 +206,19 @@ const views = {
   spend() {
     const m = vm, cur = mk(today());
     const car = carry(m), inc = mTot(m, 'in'), exp = mTot(m, 'out'), avail = car + inc, left = avail - exp;
-    const by = {};
-    S.spend.filter(x => x.k === 'out' && x.d.startsWith(m)).forEach(x => { const k = keyOf(x); by[k] = (by[k] || 0) + x.a; });
-    const items = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, v, colorOf(k)]);
-    if (left > 0) items.push(['Left', left, 'var(--up)']);
+    const by = {}, byIn = {};
+    S.spend.filter(x => x.d.startsWith(m)).forEach(x => {
+      const k = keyOf(x), t = x.k === 'out' ? by : byIn;
+      t[k] = (t[k] || 0) + x.a;
+    });
+    const outItems = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, v, colorOf(k)]);
+    if (left > 0) outItems.push(['Left', left, 'var(--up)']);
+    const inItems = [];
+    if (car > 0) inItems.push(['Carried over', car, '#64748b']);
+    Object.entries(byIn).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => inItems.push([k, v, colorOf(k)]));
     const total = Math.max(avail, exp);
     const entries = S.spend.filter(x => x.d.startsWith(m));
+    const lg = ([k, v, col]) => `<div><i style="background:${col}"></i><span>${esc(k)}</span><em>${Math.round(v / total * 100)}%</em></div>`;
     return `<div class="week"><button class="ar" data-a="mprev">‹</button>
       <div class="mt"><b>${mName(m)}</b><small>${m === cur ? 'This month' : 'Past month'}</small></div>
       <button class="ar" data-a="mnext" ${m >= cur ? 'disabled' : ''}>›</button></div>
@@ -217,8 +227,9 @@ const views = {
         <div class="card"><small>Income</small><div class="big up">+${birr(inc)}</div></div>
         <div class="card"><small>Spent</small><div class="big dn">-${birr(exp)}</div></div>
         <div class="card"><small>Balance</small><div class="big ${left >= 0 ? 'up' : 'dn'}">${left >= 0 ? '' : '-'}${birr(Math.abs(left))}</div></div></div>
-      ${total > 0 ? `<div class="card"><div class="dn-wrap">${donut(items, total, left)}<div class="leg">${items.map(([k, v, col]) =>
-        `<div><i style="background:${col}"></i><span>${esc(k)}</span><em>${Math.round(v / total * 100)}%</em></div>`).join('')}</div></div></div>` : ''}
+      ${total > 0 ? `<div class="card"><div class="dn-wrap">${donut(inItems, outItems, total, left)}<div class="leg">
+        ${inItems.length ? '<small>Income</small>' + inItems.map(lg).join('') : ''}
+        ${outItems.length ? '<small>Spent</small>' + outItems.map(lg).join('') : ''}</div></div></div>` : ''}
       ${m === cur ? `<div class="card form">
         <div class="seg"><button class="${kind === 'out' ? 'on' : ''}" data-a="kind" data-id="out">Expense</button><button class="${kind === 'in' ? 'on' : ''}" data-a="kind" data-id="in">Income</button></div>
         <input id="sa" type="number" inputmode="decimal" placeholder="Amount in Birr">
