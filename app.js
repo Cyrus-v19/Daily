@@ -57,7 +57,7 @@ function carry(m) {
   while (cur < m) { c = Math.max(0, c + mTot(cur, 'in') - mTot(cur, 'out')); cur = mShift(cur, 1); }
   return c;
 }
-const CC = { Food: '#f59e0b', Transport: '#3b82f6', Bills: '#a855f7', Shopping: '#ec4899', Other: '#8aa0b2' };
+const CC = { Food: '#f59e0b', Transport: '#3b82f6', Bills: '#a855f7', Shopping: '#ec4899', Other: '#8aa0b2', Salary: '#14b8a6', Business: '#6366f1', Gift: '#f43f5e' };
 const keyOf = x => x.c === 'Other' && x.n ? x.n.trim().toLowerCase().replace(/^./, c => c.toUpperCase()) : x.c;
 const colorOf = k => { if (CC[k]) return CC[k]; let h = 0; for (const ch of k) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 70% 58%)`; };
 const CATS = { out: ['Food', 'Transport', 'Bills', 'Shopping', 'Other'], in: ['Salary', 'Business', 'Gift', 'Other'] };
@@ -226,7 +226,7 @@ const views = {
         <input id="sn" placeholder="Note (optional)" maxlength="40">
         <button data-a="addSpend">Add ${kind === 'out' ? 'expense' : 'income'}</button></div>` : ''}
       ${entries.length ? entries.map(x => `<div class="row">
-        <span class="c" style="color:${x.k === 'in' ? 'var(--up)' : colorOf(keyOf(x))}">${esc(x.c)}</span>
+        <span class="c" style="color:${colorOf(keyOf(x))}">${esc(x.c)}</span>
         <span>${esc(x.n) || '&nbsp;'}<small>${x.d}</small></span>
         <b class="${x.k === 'in' ? 'up' : 'dn'}">${x.k === 'in' ? '+' : '-'}${birr(x.a)}</b>
         <button class="x" data-a="delSpend" data-id="${x.id}">×</button></div>`).join('') : '<p class="empty">Nothing logged for this month.</p>'}`;
