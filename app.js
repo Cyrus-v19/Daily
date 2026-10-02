@@ -240,7 +240,7 @@ let SY = { key: '', on: false };
 try { SY = { ...SY, ...JSON.parse(localStorage.getItem('daily-sync') || '{}') }; } catch (e) {}
 const saveSY = () => { try { localStorage.setItem('daily-sync', JSON.stringify(SY)); } catch (e) {} };
 let syMsg = SY.on ? 'Sync is on.' : '', pt;
-const hasData = d => d && ((d.tasks && d.tasks.length) || (d.habits && d.habits.length) || (d.spend && d.spend.length));
+const hasData = d => d && ((d.tasks && d.tasks.length) || (d.habits && d.habits.length) || (d.spend && d.spend.length) || (d.notes && d.notes.length));
 const stamp = () => 'Synced ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 const setMsg = m => { syMsg = m; const el = $('#symsg'); if (el) el.textContent = m; };
 
@@ -424,8 +424,68 @@ views.report = function () {
       <p>${tk.length ? 'Tasks done: <b>' + td + ' of ' + tk.length + '</b>' : 'No tasks this month.'}</p>
       ${hb.map(([n, c]) => `<p>${esc(n)}: <b>${c}</b> day${c === 1 ? '' : 's'} done</p>`).join('')}</div>`;
 };
-
-const tabNames = { tasks: 'Tasks', habits: 'Habits', spend: 'Money', report: 'Report', style: 'Style' };
+/* notes */
+let noteId = null, nq = '', ntag = '';
+const NT = () => (S.notes = S.notes || []);
+const ntags = n => n.g || [];
+function noteListHtml() {
+  const q = nq.trim().toLowerCase();
+  const list = NT().filter(n => (!ntag || ntags(n).includes(ntag)) && (!q || ((n.t || '') + ' ' + (n.b || '') + ' ' + ntags(n).join(' ')).toLowerCase().includes(q)));
+  list.sort((a, b) => (b.p ? 1 : 0) - (a.p ? 1 : 0) || b.u - a.u);
+  if (!list.length) return '<p class="empty">' + (NT().length ? 'No notes match.' : 'No notes yet. Tap New note.') + '</p>';
+  return list.map(n => `<div class="note" data-a="openNote" data-id="${n.id}">
+    <div class="nh"><b>${esc(n.t || 'Untitled')}</b>${n.p ? '<span>📌</span>' : ''}</div>
+    <p>${esc((n.b || '').slice(0, 110))}</p>
+    <div class="ng">${ntags(n).map(g => `<i>#${esc(g)}</i>`).join('')}<small>${new Date(n.u).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</small></div></div>`).join('');
+}
+views.notes = function () {
+  if (noteId) {
+    const n = NT().find(x => x.id === noteId);
+    if (!n) { noteId = null; return views.notes(); }
+    return `<div class="dl"><button class="ghost sm" data-a="backNote">‹ Notes</button>
+      <div><button class="ghost sm" data-a="pinNote">${n.p ? 'Unpin' : '📌 Pin'}</button> <button class="ghost sm" data-a="delNote">Delete</button></div></div>
+      <div class="card form">
+        <input id="nti" placeholder="Title" maxlength="80" value="${esc(n.t || '')}">
+        <textarea id="nbd" placeholder="Write here...">${esc(n.b || '')}</textarea>
+        <input id="ntg" placeholder="Tags, separated by commas" maxlength="60" value="${esc(ntags(n).join(', '))}"></div>`;
+  }
+  const all = [...new Set(NT().flatMap(ntags))];
+  return `<div class="add"><input id="nsq" type="search" placeholder="Search notes" value="${esc(nq)}"><button data-a="newNote">New note</button></div>
+    ${all.length ? `<div class="chips"><button class="${ntag ? '' : 'on'}" data-a="tagNote" data-id="">All</button>${all.map(g => `<button class="${ntag === g ? 'on' : ''}" data-a="tagNote" data-id="${esc(g)}">#${esc(g)}</button>`).join('')}</div>` : ''}
+    <div id="nlist">${noteListHtml()}</div>`;
+};
+Object.assign(act, {
+  newNote() { const n = { id: uid(), t: '', b: '', g: [], p: false, u: Date.now() }; NT().unshift(n); noteId = n.id; },
+  openNote(id) { noteId = id; },
+  backNote() {
+    const n = NT().find(x => x.id === noteId);
+    if (n && !n.t && !n.b && !ntags(n).length) S.notes = NT().filter(x => x !== n);
+    noteId = null;
+  },
+  pinNote() { const n = NT().find(x => x.id === noteId); if (n) { n.p = !n.p; n.u = Date.now(); } },
+  delNote() { if (confirm('Delete this note?')) { S.notes = NT().filter(x => x.id !== noteId); noteId = null; } },
+  tagNote(id) { ntag = id; }
+});
+$('#app').addEventListener('input', e => {
+  const id = e.target.id;
+  if (id === 'nsq') { nq = e.target.value; const el = $('#nlist'); if (el) el.innerHTML = noteListHtml(); return; }
+  const n = noteId && NT().find(x => x.id === noteId);
+  if (!n) return;
+  if (id === 'nti') n.t = e.target.value;
+  else if (id === 'nbd') n.b = e.target.value;
+  else if (id === 'ntg') n.g = e.target.value.split(',').map(s => s.trim().replace(/^#/, '').toLowerCase()).filter(Boolean);
+  else return;
+  n.u = Date.now();
+  save();
+});
+$('#app').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.target.id === 'nsq' || e.target.id === 'nti' || e.target.id === 'ntg')) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    e.target.blur();
+  }
+}, true);
+const tabNames = { tasks: 'Tasks', habits: 'Habits', notes: 'Notes', spend: 'Money', report: 'Report', style: 'Style' };
 
 function render() {
   $('#app').innerHTML = views[tab]() + (tab === 'style' ? hrCard() + syncCard() : '');
