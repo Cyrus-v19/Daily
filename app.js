@@ -181,8 +181,10 @@ const setMsg = m => { syMsg = m; const el = $('#symsg'); if (el) el.textContent 
 
 async function api(method, data) {
   const r = await fetch('https://daily-zxc-04e9.vercel.app/api/sync', { method, headers: { 'Content-Type': 'application/json', 'x-sync-key': SY.key }, body: data ? JSON.stringify({ data }) : undefined });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'Sync failed');
+  const txt = await r.text();
+  let j = {};
+  try { j = JSON.parse(txt); } catch (e) {}
+  if (!r.ok) throw new Error('Error ' + r.status + ': ' + txt.slice(0, 150));
   return j;
 }
 function queuePush() { if (!SY.on) return; clearTimeout(pt); pt = setTimeout(push, 1500); }
