@@ -93,17 +93,36 @@ function checkReminders() {
   });
   if (ch) { save(); if (tab === 'tasks' && document.activeElement.tagName !== 'INPUT') render(); }
 }
-
+/* native notifications (APK only) */
+const LN = () => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) || null;
+const nid = id => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 + 1; };
+async function schedNative(t) {
+  const ln = LN();
+  if (!ln || !t || !t.tm || t.done) return;
+  const at = new Date(t.d + 'T' + t.tm + ':00');
+  if (at.getTime() <= Date.now()) return;
+  try {
+    const p = await ln.requestPermissions();
+    if (p.display !== 'granted') return;
+    await ln.schedule({ notifications: [{ id: nid(t.id), title: 'Task reminder', body: t.t, schedule: { at, allowWhileIdle: true } }] });
+  } catch (e) {}
+}
+async function cancelNative(t) {
+  const ln = LN();
+  if (!ln || !t) return;
+  try { await ln.cancel({ notifications: [{ id: nid(t.id) }] }); } catch (e) {}
+              }
 const act = {
   addTask() {
     const v = $('#nt').value.trim();
     if (!v) return;
     const tm = $('#nm').value;
     S.tasks.unshift({ id: uid(), t: v, done: false, d: sel, tm: tm || '' });
+    schedNative(S.tasks[0]);
     if (tm && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   },
-  togTask(id) { const t = S.tasks.find(x => x.id === id); t.done = !t.done; },
-  delTask(id) { S.tasks = S.tasks.filter(x => x.id !== id); },
+  togTask(id) { const t = S.tasks.find(x => x.id === id); t.done = !t.done; if (t.done) cancelNative(t); else schedNative(t); },
+  delTask(id) { const t = S.tasks.find(x => x.id === id); if (t) cancelNative(t); S.tasks = S.tasks.filter(x => x.id !== id); },
   clearDone() { S.tasks = S.tasks.filter(x => !(x.d === sel && x.done)); },
   ics(id) {
     const t = S.tasks.find(x => x.id === id);
