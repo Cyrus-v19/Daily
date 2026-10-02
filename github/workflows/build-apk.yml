@@ -16,10 +16,12 @@ jobs:
       - name: Prepare app
         working-directory: android-app
         run: |
-          mkdir -p www
+          mkdir -p www assets
           cp ../index.html ../style.css ../app.js ../icon.svg ../icon-192.png ../icon-512.png ../manifest.json ../sw.js www/
+          cp icon-only.png icon-foreground.png icon-background.png assets/
           npm install
           npx cap add android
+          npx --yes @capacitor/assets generate --android || echo "Icon step failed, using default icon"
           npx cap sync android
       - name: Build APK
         working-directory: android-app/android
