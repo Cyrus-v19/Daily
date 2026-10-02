@@ -4,6 +4,7 @@ let S = { tasks: [], habits: [], spend: [], theme: { mode: 'dark', ac: '#4cc3cc'
 try { S = { ...S, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch (e) {}
 S.theme = { mode: 'dark', ac: '#4cc3cc', ...S.theme };
 const save = () => { S.ts = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} queuePush(); };
+const ld = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
 const dstr = d => { const x = new Date(d); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
 const today = () => dstr(new Date());
 const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return dstr(x); };
@@ -93,6 +94,7 @@ function checkReminders() {
   });
   if (ch) { save(); if (tab === 'tasks' && document.activeElement.tagName !== 'INPUT') render(); }
 }
+
 /* native notifications (APK only) */
 const LN = () => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) || null;
 const nid = id => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 + 1; };
@@ -111,7 +113,49 @@ async function cancelNative(t) {
   const ln = LN();
   if (!ln || !t) return;
   try { await ln.cancel({ notifications: [{ id: nid(t.id) }] }); } catch (e) {}
-              }
+}
+
+/* habit reminder */
+async function schedHabits() {
+  const ln = LN();
+  if (!ln) return;
+  try {
+    const ids = [1, 2, 3, 4, 5, 6, 7].map(i => ({ id: 2100000000 + i }));
+    await ln.cancel({ notifications: ids });
+    if (S.hrOn === false || !S.habits.length) return;
+    const p = await ln.requestPermissions();
+    if (p.display !== 'granted') return;
+    const [h, mi] = (S.hrt || '20:00').split(':').map(Number);
+    const t = today(), left = S.habits.filter(x => !x.days.includes(t)).length;
+    const list = [];
+    for (let i = 0; i < 7; i++) {
+      const at = new Date();
+      at.setDate(at.getDate() + i);
+      at.setHours(h, mi, 0, 0);
+      if (at.getTime() <= Date.now()) continue;
+      if (i === 0 && !left) continue;
+      list.push({
+        id: 2100000000 + i + 1,
+        title: '🔥 Keep your streak alive',
+        body: i === 0 ? left + ' habit' + (left > 1 ? 's' : '') + ' still open today. Do it before midnight.' : 'Mark your habits done before midnight.',
+        schedule: { at, allowWhileIdle: true }
+      });
+    }
+    if (list.length) await ln.schedule({ notifications: list });
+  } catch (e) {}
+}
+let ht;
+const habSoon = () => { clearTimeout(ht); ht = setTimeout(schedHabits, 800); };
+function habitNudge() {
+  if (LN() || S.hrOn === false || !S.habits.length) return;
+  const n = new Date(), t = today(), hm = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+  if (hm < (S.hrt || '20:00') || S.hnd === t) return;
+  const left = S.habits.filter(h => !h.days.includes(t)).length;
+  S.hnd = t;
+  save();
+  if (left) toast('🔥 ' + left + ' habit' + (left > 1 ? 's' : '') + ' still open today');
+}
+
 const act = {
   addTask() {
     const v = $('#nt').value.trim();
@@ -140,6 +184,7 @@ const act = {
     a.remove();
   },
   perm() { if ('Notification' in window) Notification.requestPermission().then(() => render()); },
+  hrtog() { S.hrOn = S.hrOn === false; },
   prev() { sel = shift(sel, -1); },
   next() { sel = shift(sel, 1); },
   pick(id) { sel = id; },
@@ -189,6 +234,7 @@ function donut(inc, out, total, left) {
     <text x="60" y="56" text-anchor="middle" font-size="9" style="fill:var(--mut)">${left >= 0 ? 'Left' : 'Over'}</text>
     <text x="60" y="72" text-anchor="middle" font-size="14" font-weight="700" style="fill:${left >= 0 ? 'var(--up)' : 'var(--dn)'}">${short(Math.abs(left))}</text></svg>`;
 }
+
 /* cloud sync */
 let SY = { key: '', on: false };
 try { SY = { ...SY, ...JSON.parse(localStorage.getItem('daily-sync') || '{}') }; } catch (e) {}
@@ -243,7 +289,15 @@ function syncCard() {
   return `<div class="card"><b>Cloud sync</b><p><small id="symsg">${esc(syMsg) || 'Back up your data and keep your devices in step.'}</small></p>
     ${SY.on ? '<button class="full" data-a="syncnow">Sync now</button><button class="ghost full" data-a="syncoff" style="margin-top:8px">Turn off</button>'
       : '<input id="sk" type="password" placeholder="Your sync passphrase"><button class="full" data-a="syncon" style="margin-top:8px">Turn on sync</button>'}</div>`;
-    }
+}
+function hrCard() {
+  const on = S.hrOn !== false;
+  return `<div class="card"><b>Habit reminder</b>
+    <p><small>${on ? 'A nudge each evening if a habit is still open.' : 'The evening nudge is off.'}${LN() ? '' : ' It shows while the app is open.'}</small></p>
+    <label><small>Time</small><input id="hrt" type="time" value="${S.hrt || '20:00'}"></label>
+    <button class="${on ? 'ghost ' : ''}full" data-a="hrtog" style="margin-top:10px">${on ? 'Turn off' : 'Turn on'}</button></div>`;
+}
+
 const views = {
   tasks() {
     const list = S.tasks.filter(t => t.d === sel).sort((a, b) => (a.tm || '99:99').localeCompare(b.tm || '99:99'));
@@ -330,10 +384,51 @@ const views = {
   }
 };
 
-const tabNames = { tasks: 'Tasks', habits: 'Habits', spend: 'Money', style: 'Style' };
+views.report = function () {
+  const m = vm, cur = mk(today()), pm = mShift(m, -1);
+  const inc = mTot(m, 'in'), exp = mTot(m, 'out'), net = inc - exp, pexp = mTot(pm, 'out');
+  const catsOf = mm => { const o = {}; S.spend.filter(x => x.k === 'out' && x.d.startsWith(mm)).forEach(x => { const k = keyOf(x); o[k] = (o[k] || 0) + x.a; }); return o; };
+  const a = catsOf(m), b = catsOf(pm);
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort((x, y) => (a[y] || 0) - (a[x] || 0) || (b[y] || 0) - (b[x] || 0));
+  const mx = Math.max(1, ...keys.map(k => Math.max(a[k] || 0, b[k] || 0)));
+  const [yy, mo] = m.split('-').map(Number);
+  const days = m === cur ? new Date().getDate() : new Date(yy, mo, 0).getDate();
+  const chg = pexp > 0 ? Math.round((exp - pexp) / pexp * 100) : null;
+  const rate = inc > 0 ? Math.round(net / inc * 100) : null;
+  const top = Object.entries(a).sort((x, y) => y[1] - x[1])[0];
+  const big = S.spend.filter(x => x.k === 'out' && x.d.startsWith(m)).sort((x, y) => y.a - x.a)[0];
+  const tk = S.tasks.filter(t => t.d.startsWith(m)), td = tk.filter(t => t.done).length;
+  const hb = S.habits.map(h => [h.n, h.days.filter(d => d.startsWith(m)).length]);
+  const pn = mName(pm).split(' ')[0], mn = mName(m).split(' ')[0];
+  const lines = [];
+  if (top && exp) lines.push(`Most of your spending went to <b>${esc(top[0])}</b> (${Math.round(top[1] / exp * 100)}%).`);
+  if (big) lines.push(`Biggest expense: <b>${birr(big.a)}</b>${big.n ? ' on ' + esc(big.n) : ' in ' + esc(big.c)}.`);
+  if (exp) lines.push(`You spent about <b>${birr(exp / days)}</b> a day.`);
+  return `<div class="week"><button class="ar" data-a="mprev">‹</button>
+    <div class="mt"><b>${mName(m)}</b><small>${m === cur ? 'So far this month' : 'Past month'}</small></div>
+    <button class="ar" data-a="mnext" ${m >= cur ? 'disabled' : ''}>›</button></div>
+    <div class="card"><small>Saved this month</small>
+      <div class="big ${net >= 0 ? 'up' : 'dn'}">${net >= 0 ? '+' : '-'}${birr(Math.abs(net))}</div>
+      <small>${rate === null ? 'No income logged yet.' : (net >= 0 ? 'You kept ' + rate + '% of your income.' : 'You spent more than you earned.')}</small></div>
+    <div class="tiles">
+      <div class="card"><small>Income</small><div class="big up">+${birr(inc)}</div></div>
+      <div class="card"><small>Spent</small><div class="big dn">-${birr(exp)}</div>
+        ${chg === null ? '' : `<span class="pill ${chg <= 0 ? 'up' : 'dn'}">${chg > 0 ? '+' : ''}${chg}% vs ${pn}</span>`}</div></div>
+    ${lines.length ? `<div class="card ins">${lines.map(l => `<p>${l}</p>`).join('')}</div>` : ''}
+    <div class="card"><b>Spending by category</b>
+      <p><small>Colored bar: ${mn}. Grey bar: ${pn}.</small></p>
+      ${keys.length ? keys.map(k => `<div class="rb"><div class="rl"><span>${esc(k)}</span><b>${birr(a[k] || 0)}</b></div>
+        <div class="rt"><i style="width:${(a[k] || 0) / mx * 100}%;background:${colorOf(k)}"></i></div>
+        <div class="rt p"><i style="width:${(b[k] || 0) / mx * 100}%"></i></div></div>`).join('') : '<p class="empty">No spending logged.</p>'}</div>
+    <div class="card"><b>Tasks and habits</b>
+      <p>${tk.length ? 'Tasks done: <b>' + td + ' of ' + tk.length + '</b>' : 'No tasks this month.'}</p>
+      ${hb.map(([n, c]) => `<p>${esc(n)}: <b>${c}</b> day${c === 1 ? '' : 's'} done</p>`).join('')}</div>`;
+};
+
+const tabNames = { tasks: 'Tasks', habits: 'Habits', spend: 'Money', report: 'Report', style: 'Style' };
 
 function render() {
-  $('#app').innerHTML = views[tab]() + (tab === 'style' ? syncCard() : '');
+  $('#app').innerHTML = views[tab]() + (tab === 'style' ? hrCard() + syncCard() : '');
   [...$('#tabs').children].forEach(b => b.classList.toggle('on', b.dataset.t === tab));
 }
 
@@ -344,10 +439,11 @@ $('#app').onclick = e => {
   if (b.dataset.a === 'syncoff') return syncOff();
   if (b.dataset.a === 'syncnow') return syncNow();
   const fn = act[b.dataset.a];
-  if (fn) { fn(b.dataset.id); save(); render(); }
+  if (fn) { fn(b.dataset.id); save(); render(); habSoon(); }
 };
 $('#app').oninput = e => {
   if (e.target.id === 'cc') { S.theme.ac = e.target.value; applyTheme(); save(); }
+  if (e.target.id === 'hrt' && e.target.value) { S.hrt = e.target.value; save(); habSoon(); }
 };
 $('#app').onkeydown = e => {
   if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
@@ -372,7 +468,9 @@ applyTheme();
 render();
 checkReminders();
 setInterval(checkReminders, 15000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkReminders(); });
+setInterval(habitNudge, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkReminders(); habSoon(); } });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 if (SY.on) pull().catch(() => {});
 document.addEventListener('visibilitychange', () => { if (!document.hidden && SY.on) pull().catch(() => {}); });
+habSoon();
