@@ -350,8 +350,7 @@ const views = {
       t[k] = (t[k] || 0) + x.a;
     });
     const outItems = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, v, colorOf(k)]);
-    if (left > 0
-        if (left > 0) outItems.push(['Left', left, 'var(--up)']);
+    if (left > 0) outItems.push(['Left', left, 'var(--up)']);
     const inItems = [];
     if (car > 0) inItems.push(['Carried over', car, '#64748b']);
     Object.entries(byIn).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => inItems.push([k, v, colorOf(k)]));
