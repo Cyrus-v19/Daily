@@ -4,13 +4,24 @@ let S = { tasks: [], habits: [], spend: [], theme: { mode: 'dark', ac: '#4cc3cc'
 try { S = { ...S, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch (e) {}
 S.theme = { mode: 'dark', ac: '#4cc3cc', ...S.theme };
 const save = () => { S.ts = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} queuePush(); };
-const ld = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
 const dstr = d => { const x = new Date(d); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
 const today = () => dstr(new Date());
 const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return dstr(x); };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const birr = v => v.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' Br';
+const ic = (p, s = 22) => '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
+const ICON = {
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  pin: '<path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  notes: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  report: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  style: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>'
+};
 S.tasks.forEach(t => { if (!t.d) t.d = today(); });
 S.spend.forEach(x => { if (!x.k) x.k = 'out'; });
 
@@ -339,7 +350,8 @@ const views = {
       t[k] = (t[k] || 0) + x.a;
     });
     const outItems = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, v, colorOf(k)]);
-    if (left > 0) outItems.push(['Left', left, 'var(--up)']);
+    if (left > 0
+        if (left > 0) outItems.push(['Left', left, 'var(--up)']);
     const inItems = [];
     if (car > 0) inItems.push(['Carried over', car, '#64748b']);
     Object.entries(byIn).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => inItems.push([k, v, colorOf(k)]));
@@ -383,7 +395,6 @@ const views = {
       <div class="card"><b>Reminders</b><p><small>${msg}</small></p>${perm === 'default' ? '<button class="full" data-a="perm">Enable notifications</button>' : ''}</div>`;
   }
 };
-
 views.report = function () {
   const m = vm, cur = mk(today()), pm = mShift(m, -1);
   const inc = mTot(m, 'in'), exp = mTot(m, 'out'), net = inc - exp, pexp = mTot(pm, 'out');
@@ -428,34 +439,47 @@ views.report = function () {
 let noteId = null, nq = '', ntag = '';
 const NT = () => (S.notes = S.notes || []);
 const ntags = n => n.g || [];
+const NCOL = ['', '#ef4444', '#f59e0b', '#3dbe8b', '#14b8a6', '#3b82f6', '#a855f7', '#ec4899'];
+function noteCard(n) {
+  const c = n.c || '';
+  const st = c ? ` style="background:${c}22;border-color:${c}66"` : '';
+  return `<div class="note" data-a="openNote" data-id="${n.id}"${st}>
+    ${n.t ? `<b>${esc(n.t)}</b>` : ''}
+    ${n.b ? `<p>${esc(n.b.slice(0, 240))}</p>` : (n.t ? '' : '<p>Empty note</p>')}
+    ${ntags(n).length ? `<div class="ng">${ntags(n).map(g => `<i>#${esc(g)}</i>`).join('')}</div>` : ''}</div>`;
+}
 function noteListHtml() {
   const q = nq.trim().toLowerCase();
   const list = NT().filter(n => (!ntag || ntags(n).includes(ntag)) && (!q || ((n.t || '') + ' ' + (n.b || '') + ' ' + ntags(n).join(' ')).toLowerCase().includes(q)));
-  list.sort((a, b) => (b.p ? 1 : 0) - (a.p ? 1 : 0) || b.u - a.u);
-  if (!list.length) return '<p class="empty">' + (NT().length ? 'No notes match.' : 'No notes yet. Tap New note.') + '</p>';
-  return list.map(n => `<div class="note" data-a="openNote" data-id="${n.id}">
-    <div class="nh"><b>${esc(n.t || 'Untitled')}</b>${n.p ? '<span>📌</span>' : ''}</div>
-    <p>${esc((n.b || '').slice(0, 110))}</p>
-    <div class="ng">${ntags(n).map(g => `<i>#${esc(g)}</i>`).join('')}<small>${new Date(n.u).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</small></div></div>`).join('');
+  list.sort((a, b) => b.u - a.u);
+  if (!list.length) return `<div class="nempty">${ic(ICON.notes, 46)}<p>${NT().length ? 'No notes match your search.' : 'Notes you add will appear here.'}</p></div>`;
+  const pins = list.filter(n => n.p), rest = list.filter(n => !n.p);
+  const wall = a => `<div class="wall">${a.map(noteCard).join('')}</div>`;
+  return (pins.length ? '<div class="nsec">Pinned</div>' + wall(pins) : '')
+    + (rest.length ? (pins.length ? '<div class="nsec">Others</div>' : '') + wall(rest) : '');
 }
 views.notes = function () {
   if (noteId) {
     const n = NT().find(x => x.id === noteId);
     if (!n) { noteId = null; return views.notes(); }
-    return `<div class="dl"><button class="ghost sm" data-a="backNote">‹ Notes</button>
-      <div><button class="ghost sm" data-a="pinNote">${n.p ? 'Unpin' : '📌 Pin'}</button> <button class="ghost sm" data-a="delNote">Delete</button></div></div>
-      <div class="card form">
-        <input id="nti" placeholder="Title" maxlength="80" value="${esc(n.t || '')}">
-        <textarea id="nbd" placeholder="Write here...">${esc(n.b || '')}</textarea>
-        <input id="ntg" placeholder="Tags, separated by commas" maxlength="60" value="${esc(ntags(n).join(', '))}"></div>`;
+    const c = n.c || '';
+    return `<div class="ed" style="${c ? 'background:' + c + '22;border-color:' + c + '66' : ''}">
+      <div class="eb"><button class="ib" data-a="backNote" aria-label="Back">${ic(ICON.back)}</button><span class="sp"></span>
+        <button class="ib ${n.p ? 'on' : ''}" data-a="pinNote" aria-label="Pin">${ic(ICON.pin)}</button>
+        <button class="ib" data-a="delNote" aria-label="Delete">${ic(ICON.trash)}</button></div>
+      <input id="nti" class="et" placeholder="Title" maxlength="80" value="${esc(n.t || '')}">
+      <textarea id="nbd" class="eta" placeholder="Start writing...">${esc(n.b || '')}</textarea>
+      <input id="ntg" class="etg" placeholder="Add tags, separated by commas" maxlength="60" value="${esc(ntags(n).join(', '))}">
+      <div class="cols">${NCOL.map(k => `<button class="cd ${(n.c || '') === k ? 'on' : ''}" style="background:${k || 'var(--field)'}" data-a="colNote" data-id="${k}" aria-label="Color"></button>`).join('')}</div>
+      <small class="edt">Edited ${new Date(n.u).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></div>`;
   }
   const all = [...new Set(NT().flatMap(ntags))];
-  return `<div class="add"><input id="nsq" type="search" placeholder="Search notes" value="${esc(nq)}"><button data-a="newNote">New note</button></div>
+  return `<label class="sb">${ic(ICON.search, 20)}<input id="nsq" type="search" placeholder="Search your notes" value="${esc(nq)}"></label>
     ${all.length ? `<div class="chips"><button class="${ntag ? '' : 'on'}" data-a="tagNote" data-id="">All</button>${all.map(g => `<button class="${ntag === g ? 'on' : ''}" data-a="tagNote" data-id="${esc(g)}">#${esc(g)}</button>`).join('')}</div>` : ''}
     <div id="nlist">${noteListHtml()}</div>`;
 };
 Object.assign(act, {
-  newNote() { const n = { id: uid(), t: '', b: '', g: [], p: false, u: Date.now() }; NT().unshift(n); noteId = n.id; },
+  newNote() { const n = { id: uid(), t: '', b: '', g: [], p: false, c: '', u: Date.now() }; NT().unshift(n); noteId = n.id; },
   openNote(id) { noteId = id; },
   backNote() {
     const n = NT().find(x => x.id === noteId);
@@ -463,6 +487,7 @@ Object.assign(act, {
     noteId = null;
   },
   pinNote() { const n = NT().find(x => x.id === noteId); if (n) { n.p = !n.p; n.u = Date.now(); } },
+  colNote(id) { const n = NT().find(x => x.id === noteId); if (n) { n.c = id; n.u = Date.now(); } },
   delNote() { if (confirm('Delete this note?')) { S.notes = NT().filter(x => x.id !== noteId); noteId = null; } },
   tagNote(id) { ntag = id; }
 });
@@ -485,11 +510,49 @@ $('#app').addEventListener('keydown', e => {
     e.target.blur();
   }
 }, true);
-const tabNames = { tasks: 'Tasks', habits: 'Habits', notes: 'Notes', spend: 'Money', report: 'Report', style: 'Style' };
+/* tabs and menu */
+const tabNames = { tasks: 'Tasks', habits: 'Habits', spend: 'Money' };
+const MENU = { notes: ['Notes', ICON.notes], report: ['Report', ICON.report], style: ['Style', ICON.style] };
+
+Object.keys(tabNames).forEach(k => {
+  const b = document.createElement('button');
+  b.textContent = tabNames[k];
+  b.dataset.t = k;
+  b.onclick = () => { tab = k; render(); };
+  $('#tabs').appendChild(b);
+});
+
+const mb = document.createElement('button');
+mb.id = 'mb';
+mb.setAttribute('aria-label', 'Menu');
+mb.innerHTML = ic(ICON.menu, 24);
+document.querySelector('header').appendChild(mb);
+const mn = document.createElement('div');
+mn.id = 'menu';
+mn.innerHTML = Object.keys(MENU).map(k => `<button data-m="${k}">${ic(MENU[k][1], 20)}<span>${MENU[k][0]}</span></button>`).join('');
+document.body.appendChild(mn);
+const mv = document.createElement('div');
+mv.id = 'mv';
+document.body.appendChild(mv);
+const menuOpen = o => { mn.classList.toggle('open', o); mv.classList.toggle('open', o); };
+mb.onclick = () => menuOpen(!mn.classList.contains('open'));
+mv.onclick = () => menuOpen(false);
+mn.onclick = e => {
+  const b = e.target.closest('[data-m]');
+  if (!b) return;
+  tab = b.dataset.m;
+  menuOpen(false);
+  render();
+};
 
 function render() {
-  $('#app').innerHTML = views[tab]() + (tab === 'style' ? hrCard() + syncCard() : '');
+  $('#app').innerHTML = views[tab]()
+    + (tab === 'style' ? hrCard() + syncCard() : '')
+    + (tab === 'notes' && !noteId ? `<button class="fab" data-a="newNote" aria-label="New note">${ic(ICON.plus, 26)}</button>` : '');
   [...$('#tabs').children].forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  [...mn.children].forEach(b => b.classList.toggle('on', b.dataset.m === tab));
+  mb.classList.toggle('on', !!MENU[tab]);
+  if (tab === 'notes' && noteId) { const el = $('#nti'); if (el && !el.value) el.focus(); }
 }
 
 $('#app').onclick = e => {
@@ -511,14 +574,6 @@ $('#app').onkeydown = e => {
     if (box) box.querySelector('button:last-child').click();
   }
 };
-
-Object.keys(tabNames).forEach(k => {
-  const b = document.createElement('button');
-  b.textContent = tabNames[k];
-  b.dataset.t = k;
-  b.onclick = () => { tab = k; render(); };
-  $('#tabs').appendChild(b);
-});
 
 const now = new Date(), hr = now.getHours();
 $('#hi').textContent = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
