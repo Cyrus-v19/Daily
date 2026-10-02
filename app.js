@@ -180,7 +180,7 @@ const stamp = () => 'Synced ' + new Date().toLocaleTimeString('en-US', { hour: '
 const setMsg = m => { syMsg = m; const el = $('#symsg'); if (el) el.textContent = m; };
 
 async function api(method, data) {
-  const r = await fetch('https://daily-zxc-04e9.vercel.app/api/sync', {
+  const r = await fetch('https://daily-zxc-04e9.vercel.app/api/sync', { method, headers: { 'Content-Type': 'application/json', 'x-sync-key': SY.key }, body: data ? JSON.stringify({ data }) : undefined });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || 'Sync failed');
   return j;
