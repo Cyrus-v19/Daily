@@ -3,7 +3,7 @@ const KEY = 'daily-v1';
 let S = { tasks: [], habits: [], spend: [], theme: { mode: 'dark', ac: '#4cc3cc' } };
 try { S = { ...S, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch (e) {}
 S.theme = { mode: 'dark', ac: '#4cc3cc', ...S.theme };
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+const save = () => { S.ts = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} queuePush(); };
 const dstr = d => { const x = new Date(d); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
 const today = () => dstr(new Date());
 const shift = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return dstr(x); };
@@ -170,7 +170,59 @@ function donut(inc, out, total, left) {
     <text x="60" y="56" text-anchor="middle" font-size="9" style="fill:var(--mut)">${left >= 0 ? 'Left' : 'Over'}</text>
     <text x="60" y="72" text-anchor="middle" font-size="14" font-weight="700" style="fill:${left >= 0 ? 'var(--up)' : 'var(--dn)'}">${short(Math.abs(left))}</text></svg>`;
 }
+/* cloud sync */
+let SY = { key: '', on: false };
+try { SY = { ...SY, ...JSON.parse(localStorage.getItem('daily-sync') || '{}') }; } catch (e) {}
+const saveSY = () => { try { localStorage.setItem('daily-sync', JSON.stringify(SY)); } catch (e) {} };
+let syMsg = SY.on ? 'Sync is on.' : '', pt;
+const hasData = d => d && ((d.tasks && d.tasks.length) || (d.habits && d.habits.length) || (d.spend && d.spend.length));
+const stamp = () => 'Synced ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const setMsg = m => { syMsg = m; const el = $('#symsg'); if (el) el.textContent = m; };
 
+async function api(method, data) {
+  const r = await fetch('/api/sync', { method, headers: { 'Content-Type': 'application/json', 'x-sync-key': SY.key }, body: data ? JSON.stringify({ data }) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Sync failed');
+  return j;
+}
+function queuePush() { if (!SY.on) return; clearTimeout(pt); pt = setTimeout(push, 1500); }
+async function push() {
+  try { await api('POST', S); setMsg(stamp()); } catch (e) { setMsg('Offline. Will sync on the next change.'); }
+}
+function adopt(d) {
+  S = { tasks: [], habits: [], spend: [], ...d, theme: { mode: 'dark', ac: '#4cc3cc', ...(d.theme || {}) } };
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+  applyTheme();
+  render();
+}
+async function pull() {
+  const { data } = await api('GET');
+  if (!data) return push();
+  if ((data.ts || 0) > (S.ts || 0)) { adopt(data); setMsg(stamp()); }
+  else if ((S.ts || 0) > (data.ts || 0)) return push();
+}
+async function syncOn() {
+  const k = $('#sk').value.trim();
+  if (!k) return;
+  SY.key = k;
+  try {
+    const { data } = await api('GET');
+    if (!data || (!hasData(data) && hasData(S))) await push();
+    else if (hasData(data) && hasData(S)) {
+      if (confirm('There is already data in the cloud. OK = load it onto this phone (replaces what is here). Cancel = overwrite the cloud with this phone.')) adopt(data); else await push();
+    } else adopt(data);
+    SY.on = true; saveSY(); syMsg = stamp(); render();
+  } catch (e) { SY.on = false; syMsg = e.message; render(); }
+}
+function syncOff() { SY = { key: '', on: false }; saveSY(); syMsg = ''; render(); }
+async function syncNow() {
+  try { await pull(); setMsg(stamp()); } catch (e) { setMsg(e.message); }
+}
+function syncCard() {
+  return `<div class="card"><b>Cloud sync</b><p><small id="symsg">${esc(syMsg) || 'Back up your data and keep your devices in step.'}</small></p>
+    ${SY.on ? '<button class="full" data-a="syncnow">Sync now</button><button class="ghost full" data-a="syncoff" style="margin-top:8px">Turn off</button>'
+      : '<input id="sk" type="password" placeholder="Your sync passphrase"><button class="full" data-a="syncon" style="margin-top:8px">Turn on sync</button>'}</div>`;
+    }
 const views = {
   tasks() {
     const list = S.tasks.filter(t => t.d === sel).sort((a, b) => (a.tm || '99:99').localeCompare(b.tm || '99:99'));
@@ -260,13 +312,16 @@ const views = {
 const tabNames = { tasks: 'Tasks', habits: 'Habits', spend: 'Money', style: 'Style' };
 
 function render() {
-  $('#app').innerHTML = views[tab]();
+  $('#app').innerHTML = views[tab]() + (tab === 'style' ? syncCard() : '');
   [...$('#tabs').children].forEach(b => b.classList.toggle('on', b.dataset.t === tab));
 }
 
 $('#app').onclick = e => {
   const b = e.target.closest('[data-a]');
   if (!b || b.disabled) return;
+  if (b.dataset.a === 'syncon') return syncOn();
+  if (b.dataset.a === 'syncoff') return syncOff();
+  if (b.dataset.a === 'syncnow') return syncNow();
   const fn = act[b.dataset.a];
   if (fn) { fn(b.dataset.id); save(); render(); }
 };
@@ -298,3 +353,5 @@ checkReminders();
 setInterval(checkReminders, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkReminders(); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if (SY.on) pull().catch(() => {});
+document.addEventListener('visibilitychange', () => { if (!document.hidden && SY.on) pull().catch(() => {}); });
