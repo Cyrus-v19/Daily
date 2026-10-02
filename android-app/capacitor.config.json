@@ -1,5 +1,8 @@
 {
   "appId": "app.daily.mine",
   "appName": "Daily",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  }
 }
